@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main, feat/**]
+
+jobs:
+  bash-test:
+    name: bash 래퍼 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: test_ahcli.bash 실행 (네트워크 호출 없음)
+        run: bash test_ahcli.bash
+
+  zsh-test:
+    name: zsh 래퍼 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: zsh 설치
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: test_ahcli.zsh 실행 (네트워크 호출 없음)
+        run: zsh test_ahcli.zsh
