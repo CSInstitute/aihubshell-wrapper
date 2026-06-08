@@ -252,8 +252,12 @@ echo "[8] (옵션) 읽기 전용 실제 API — RUN_NETWORK=1 일 때만"
 # ───────────────────────────────────────────────
 if [[ "${RUN_NETWORK:-0}" == "1" ]]; then
   # 실제 aihubshell 사용. ls/pls 는 GET 조회만 → 안전. 다운로드 명령은 절대 안 함.
+  # repo 의 실제 aihubshell 을 실행 가능한 사본으로 PATH 에 올림 (mock 아님).
+  REALBIN="$SANDBOX/realbin"; mkdir -p "$REALBIN"
+  cp "$SCRIPT_DIR/aihubshell" "$REALBIN/aihubshell"; chmod 755 "$REALBIN/aihubshell"
   out="$(
-    HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
+    PATH="$REALBIN:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
+    AIHUB_PREFIX="$SANDBOX/none" \
     bash "$WRAPPER" pls 2>&1
   )"; rc_net=$?
   assert_eq "실제 pls 종료코드 0" "$rc_net" "0"
@@ -261,6 +265,76 @@ if [[ "${RUN_NETWORK:-0}" == "1" ]]; then
 else
   echo "  $(c_dim '· 건너뜀 (RUN_NETWORK=1 로 활성화)')"
 fi
+
+# ───────────────────────────────────────────────
+echo
+echo "[9] key (캐시 키 확인 — 마스킹) / logout (말소)"
+# ───────────────────────────────────────────────
+# FAKE_CONF 에는 [3] 에서 저장한 TEST_KEY_12345 가 있음
+run key
+assert_eq "key: 종료코드 0" "$RC" "0"
+assert_contains "key: 파일 소스 표시"      "$OUT" "source: file"
+assert_contains "key: 앞4·뒤4 마스킹"      "$OUT" "TEST****2345"
+assert_not_contains "key: 전체 키 미노출"  "$OUT" "TEST_KEY_12345"
+
+# 환경변수 키가 있으면 env 소스로 우선 표시
+out="$(
+  PATH="$PREFIX:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
+  AIHUB_PREFIX="$PREFIX" MOCK_LOG_FILE="$MOCK_LOG" AIHUB_APIKEY="ENV_KEY_999" \
+  bash "$PREFIX/aih" key 2>&1
+)"
+assert_contains "key: env 소스 우선"  "$out" "source: env"
+assert_contains "key: env 마스킹"     "$out" "ENV_****_999"
+
+# logout → 파일 삭제
+run logout
+assert_eq "logout: 종료코드 0" "$RC" "0"
+assert_contains "logout: 삭제 메시지" "$OUT" "removed"
+if [[ ! -f "$FAKE_CONF" ]]; then ok "logout: 키 파일 삭제됨"
+else bad "logout: 키 파일 삭제됨" "$FAKE_CONF 잔존"; fi
+
+# logout 후 key → 키 없음
+run key
+assert_eq "logout 후 key → 종료코드 1" "$RC" "1"
+assert_contains "logout 후 key → 안내" "$OUT" "캐시된 키 없음"
+
+# logout 멱등
+run logout
+assert_contains "logout 재실행 → 키 없음 안내" "$OUT" "저장된 키 없음"
+
+# ───────────────────────────────────────────────
+echo
+echo "[10] uninstall (격리 PREFIX/HOME — 실제 /opt·rc 미오염)"
+# ───────────────────────────────────────────────
+UPREFIX="$SANDBOX/uprefix"; UHOME="$SANDBOX/uhome"; mkdir -p "$UHOME"
+# 사용자 줄 + aihub PATH 줄이 섞인 가짜 rc ($PATH 는 rc 안 리터럴이라 단일따옴표 의도)
+# shellcheck disable=SC2016
+printf 'echo userline\nexport PATH="%s:$PATH"  # aihub\n' "$UPREFIX" > "$UHOME/.bashrc"
+HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" bash "$SRCDIR/ahcli.bash" install >/dev/null 2>&1
+if [[ -x "$UPREFIX/aih" && -x "$UPREFIX/aihubshell" ]]; then ok "uninstall 전: 설치 상태 확인"
+else bad "uninstall 전: 설치 상태 확인" "install 실패"; fi
+
+out="$(
+  HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" \
+  bash "$SRCDIR/ahcli.bash" uninstall 2>&1
+)"; rc_uninst=$?
+assert_eq "uninstall: 종료코드 0" "$rc_uninst" "0"
+assert_contains "uninstall: 제거 메시지" "$out" "removed"
+if [[ ! -e "$UPREFIX/aih" && ! -e "$UPREFIX/aihubshell" ]]; then ok "uninstall: 바이너리 제거됨"
+else bad "uninstall: 바이너리 제거됨" "잔존 파일 있음"; fi
+if [[ ! -d "$UPREFIX" ]]; then ok "uninstall: 빈 PREFIX 디렉터리 제거"
+else bad "uninstall: 빈 PREFIX 디렉터리 제거" "$UPREFIX 잔존"; fi
+if ! grep -qF "# aihub" "$UHOME/.bashrc"; then ok "uninstall: rc 의 PATH 라인 제거"
+else bad "uninstall: rc 의 PATH 라인 제거" "# aihub 라인 잔존"; fi
+if grep -qx "echo userline" "$UHOME/.bashrc"; then ok "uninstall: rc 의 사용자 줄 보존"
+else bad "uninstall: rc 의 사용자 줄 보존" "사용자 줄이 손상됨"; fi
+
+# uninstall 멱등
+out="$(
+  HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" \
+  bash "$SRCDIR/ahcli.bash" uninstall 2>&1
+)"
+assert_contains "uninstall 재실행 → 설치본 없음 안내" "$out" "설치본 없음"
 
 # ───────────────────────────────────────────────
 echo
