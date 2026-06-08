@@ -84,7 +84,7 @@ run() {
   AIHUB_CONF="$FAKE_CONF" \
   AIHUB_PREFIX="$PREFIX" \
   MOCK_LOG_FILE="$MOCK_LOG" \
-  bash "$PREFIX/aih" "$@" >"$SANDBOX/_out" 2>&1
+  bash "$PREFIX/ahcli" "$@" >"$SANDBOX/_out" 2>&1
   RC=$?
   OUT="$(cat "$SANDBOX/_out")"
 }
@@ -110,7 +110,7 @@ else
 fi
 
 # 셋업 sanity: 전역 install 로 PREFIX 에 실행 가능한 aihubshell 이 배치됐는가
-if [[ -x "$PREFIX/aihubshell" && -x "$PREFIX/aih" ]]; then ok "셋업: PREFIX 에 mock aihubshell 설치됨"
+if [[ -x "$PREFIX/aihubshell" && -x "$PREFIX/ahcli" ]]; then ok "셋업: PREFIX 에 mock aihubshell 설치됨"
 else bad "셋업: PREFIX 에 mock aihubshell 설치됨" "install 실패 — 이후 테스트 신뢰불가"; fi
 
 # ───────────────────────────────────────────────
@@ -184,7 +184,7 @@ echo "[6] 키 해석 우선순위 / 부재 처리"
 out="$(
   PATH="$PREFIX:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
   AIHUB_PREFIX="$PREFIX" MOCK_LOG_FILE="$MOCK_LOG" AIHUB_APIKEY="ENV_KEY_999" \
-  bash "$PREFIX/aih" get 71265 2>&1
+  bash "$PREFIX/ahcli" get 71265 2>&1
 )"
 assert_contains "AIHUB_APIKEY 가 파일보다 우선" "$out" "[-aihubapikey] [ENV_KEY_999]"
 
@@ -193,7 +193,7 @@ EMPTY_CONF="$SANDBOX/empty/key"
 out="$(
   PATH="$PREFIX:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$EMPTY_CONF" \
   AIHUB_PREFIX="$PREFIX" MOCK_LOG_FILE="$MOCK_LOG" \
-  bash "$PREFIX/aih" get 71265 2>&1
+  bash "$PREFIX/ahcli" get 71265 2>&1
 )"; rc_nokey=$?
 assert_contains "키 부재 → 안내 메시지" "$out" "no key"
 assert_eq "키 부재 → 비정상 종료" "$rc_nokey" "1"
@@ -210,7 +210,7 @@ out="$(
   AIHUB_PREFIX="$SANDBOX/none" MOCK_LOG_FILE="$MOCK_LOG" \
   bash "$ISO/ahcli.bash" ls 2>&1
 )"; rc_noshell=$?
-assert_contains "aihubshell 없음 → 안내 메시지" "$out" "aihubshell 없음"
+assert_contains "aihubshell 없음 → 안내 메시지" "$out" "is not found"
 assert_eq "aihubshell 없음 → 종료코드 1" "$rc_noshell" "1"
 
 # ───────────────────────────────────────────────
@@ -240,7 +240,7 @@ assert_eq "install: 비실행 소스로도 설치 성공 (exit 0)" "$rc_inst" "0
 assert_contains "install: 설치 완료 메시지" "$out" "installed"
 if [[ -x "$INST_PREFIX/aihubshell" ]]; then ok "install: 사본에 실행권한 755 부여"
 else bad "install: 사본에 실행권한 755 부여" "$INST_PREFIX/aihubshell 실행불가"; fi
-if [[ -x "$INST_PREFIX/aih" ]]; then ok "install: ahcli 래퍼 복제됨"
+if [[ -x "$INST_PREFIX/ahcli" ]]; then ok "install: ahcli 래퍼 복제됨"
 else bad "install: ahcli 래퍼 복제됨" "$INST_PREFIX/ahcli 없음"; fi
 # 실제 /opt 와 사용자 rc 파일은 건드리지 않았는지
 if [[ ! -e /opt/aihub || -n "${ALLOW_OPT:-}" ]]; then ok "install: 실제 /opt/aihub 미오염"
@@ -281,7 +281,7 @@ assert_not_contains "key: 전체 키 미노출"  "$OUT" "TEST_KEY_12345"
 out="$(
   PATH="$PREFIX:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
   AIHUB_PREFIX="$PREFIX" MOCK_LOG_FILE="$MOCK_LOG" AIHUB_APIKEY="ENV_KEY_999" \
-  bash "$PREFIX/aih" key 2>&1
+  bash "$PREFIX/ahcli" key 2>&1
 )"
 assert_contains "key: env 소스 우선"  "$out" "source: env"
 assert_contains "key: env 마스킹"     "$out" "ENV_****_999"
@@ -296,11 +296,11 @@ else bad "logout: 키 파일 삭제됨" "$FAKE_CONF 잔존"; fi
 # logout 후 key → 키 없음
 run key
 assert_eq "logout 후 key → 종료코드 1" "$RC" "1"
-assert_contains "logout 후 key → 안내" "$OUT" "캐시된 키 없음"
+assert_contains "logout 후 key → 안내" "$OUT" "No cached key"
 
 # logout 멱등
 run logout
-assert_contains "logout 재실행 → 키 없음 안내" "$OUT" "저장된 키 없음"
+assert_contains "logout 재실행 → 키 없음 안내" "$OUT" "No saved key"
 
 # ───────────────────────────────────────────────
 echo
@@ -311,7 +311,7 @@ UPREFIX="$SANDBOX/uprefix"; UHOME="$SANDBOX/uhome"; mkdir -p "$UHOME"
 # shellcheck disable=SC2016
 printf 'echo userline\nexport PATH="%s:$PATH"  # aihub\n' "$UPREFIX" > "$UHOME/.bashrc"
 HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" bash "$SRCDIR/ahcli.bash" install >/dev/null 2>&1
-if [[ -x "$UPREFIX/aih" && -x "$UPREFIX/aihubshell" ]]; then ok "uninstall 전: 설치 상태 확인"
+if [[ -x "$UPREFIX/ahcli" && -x "$UPREFIX/aihubshell" ]]; then ok "uninstall 전: 설치 상태 확인"
 else bad "uninstall 전: 설치 상태 확인" "install 실패"; fi
 
 out="$(
@@ -320,7 +320,7 @@ out="$(
 )"; rc_uninst=$?
 assert_eq "uninstall: 종료코드 0" "$rc_uninst" "0"
 assert_contains "uninstall: 제거 메시지" "$out" "removed"
-if [[ ! -e "$UPREFIX/aih" && ! -e "$UPREFIX/aihubshell" ]]; then ok "uninstall: 바이너리 제거됨"
+if [[ ! -e "$UPREFIX/ahcli" && ! -e "$UPREFIX/aihubshell" ]]; then ok "uninstall: 바이너리 제거됨"
 else bad "uninstall: 바이너리 제거됨" "잔존 파일 있음"; fi
 if [[ ! -d "$UPREFIX" ]]; then ok "uninstall: 빈 PREFIX 디렉터리 제거"
 else bad "uninstall: 빈 PREFIX 디렉터리 제거" "$UPREFIX 잔존"; fi
@@ -334,7 +334,7 @@ out="$(
   HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" \
   bash "$SRCDIR/ahcli.bash" uninstall 2>&1
 )"
-assert_contains "uninstall 재실행 → 설치본 없음 안내" "$out" "설치본 없음"
+assert_contains "uninstall 재실행 → 설치본 없음 안내" "$out" "No install"
 
 # ───────────────────────────────────────────────
 echo
@@ -356,4 +356,4 @@ if [[ $FAIL -ne 0 ]]; then
   for n in "${FAILED_NAMES[@]}"; do echo "   - $n"; done
   exit 1
 fi
-echo " 모든 테스트 통과 ✓"
+echo " All Green ✓"

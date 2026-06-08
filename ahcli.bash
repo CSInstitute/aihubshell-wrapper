@@ -20,7 +20,7 @@ _ensure_shell() {
     return
   fi
 
-  echo "`aihubshell` is not found. Place it in the same directory as the script or run `ahcli install`" >&2
+  echo "'aihubshell' is not found. Place it in the same directory as the script, or run 'ahcli install'" >&2
   exit 1
 }
 
