@@ -135,7 +135,7 @@ assert_contains "login 저장 메시지" "$OUT" "saved"
 if [[ -f "$FAKE_CONF" ]]; then ok "키 파일 생성됨"
 else bad "키 파일 생성됨" "$FAKE_CONF 없음"; fi
 assert_eq "키 파일 내용 정확" "$(cat "$FAKE_CONF" 2>/dev/null)" "TEST_KEY_12345"
-perm="$(stat -f '%Lp' "$FAKE_CONF" 2>/dev/null || stat -c '%a' "$FAKE_CONF" 2>/dev/null)"
+perm="$(stat -c '%a' "$FAKE_CONF" 2>/dev/null || stat -f '%Lp' "$FAKE_CONF" 2>/dev/null)"
 assert_eq "키 파일 권한 600" "$perm" "600"
 
 # ───────────────────────────────────────────────
