@@ -77,6 +77,21 @@ _key() {
   echo "no key. run: ahcli login <KEY>" >&2; exit 1
 }
 
+# --- "키, 이름" 목록 라인을 표 행으로 변환 (질의어로 필터) ---
+# $1: 분류 라벨(표시폭 10에 맞춰 공백 패딩)  $2: 질의어(빈 값이면 전체)
+# aihubshell 의 배너/상태 메시지는 무시하고 '^숫자,' 라인만 처리.
+_search_rows() {
+  awk -v type="$1" -v q="$2" '
+    /^[0-9]+,/ {
+      p = index($0, ",")
+      key = substr($0, 1, p - 1)
+      name = substr($0, p + 1)
+      sub(/^[ \t]+/, "", name); sub(/[ \t\r]+$/, "", name)
+      if (q != "" && index(tolower(name), tolower(q)) == 0 && index(key, q) == 0) next
+      printf "%s  %-6s%s\n", type, key, name
+    }'
+}
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
   install)  # /opt/aihub 에 복제 + 전역 PATH 등록
@@ -148,6 +163,13 @@ case "$cmd" in
     _ensure_shell
     aihubshell -mode pl ${1:+-datapckagekey "$1"} ;;
 
+  search)  # 데이터셋 + 데이터 패키지셋 통합 검색 (분류 표기 + 표 출력)
+    _ensure_shell
+    q="${1:-}"
+    printf "%-10s  %-6s%s\n" "TYPE" "KEY" "NAME"
+    { aihubshell -mode l  2>/dev/null || true; } | _search_rows "Dataset  " "$q"
+    { aihubshell -mode pl 2>/dev/null || true; } | _search_rows "Package  " "$q" ;;
+
   get)
     _ensure_shell
     ds="$1"; shift || true
@@ -172,6 +194,7 @@ ahcli logout                Delete saved API key
 ahcli key                   Check Cached API Key (Masking)
 ahcli ls [datasetkey]       List of Datasets/Files
 ahcli pls [datapckagekey]   List of Packages/Files
+ahcli search [query]        Search datasets & packages (table, typed)
 ahcli get  <dsk> [fk...]    Download Dataset (Omitted = All)
 ahcli pget <pk>  [fk...]    Download the package
 

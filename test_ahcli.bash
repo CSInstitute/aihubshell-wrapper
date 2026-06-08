@@ -66,6 +66,11 @@ cat > "$SRCDIR/aihubshell" <<'MOCK'
 #!/usr/bin/env bash
 printf 'ARGS:'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'
 printf '%s\n' "$*" >> "$MOCK_LOG_FILE"
+# search 파싱 검증용: 목록 모드일 때 가짜 "키, 이름" 라인 방출 (배너 노이즈 포함)
+case " $* " in
+  *" -mode l "*)  printf '%s\n' '==== DataSet ====' '101, 한국어 음성' '102, 영어 음성' ;;
+  *" -mode pl "*) printf '%s\n' '==== DataPackage ====' '201, 영어 번역 말뭉치' ;;
+esac
 exit 0
 MOCK
 cp "$WRAPPER" "$SRCDIR/ahcli.bash"
@@ -154,6 +159,29 @@ assert_contains "pls → mode pl" "$OUT" "ARGS: [-mode] [pl]"
 
 run pls 999
 assert_contains "pls KEY → -datapckagekey 999" "$OUT" "[-mode] [pl] [-datapckagekey] [999]"
+
+# ───────────────────────────────────────────────
+echo
+echo "[4.5] search (데이터셋+패키지 통합 검색, 분류 표기 + 표 출력)"
+# ───────────────────────────────────────────────
+run search
+assert_eq "search: 종료코드 0"            "$RC" "0"
+assert_contains "search: 헤더 TYPE/KEY/NAME" "$OUT" "TYPE"
+assert_contains "search: 헤더 KEY"           "$OUT" "KEY"
+assert_contains "search: 헤더 NAME"          "$OUT" "NAME"
+assert_contains "search: 데이터셋 분류 표기" "$OUT" "Dataset"
+assert_contains "search: 패키지 분류 표기"   "$OUT" "Package"
+assert_contains "search: 데이터셋 행 이름"   "$OUT" "한국어 음성"
+assert_contains "search: 데이터셋 행 KEY"    "$OUT" "101"
+assert_contains "search: 패키지 행 이름"     "$OUT" "영어 번역 말뭉치"
+assert_contains "search: 패키지 행 KEY"      "$OUT" "201"
+# 배너/상태 노이즈 라인은 표에 새지 않아야 함
+assert_not_contains "search: 배너 노이즈 필터" "$OUT" "DataSet ===="
+
+run search 한국어
+assert_contains "search 질의: 매칭 데이터셋 포함"   "$OUT" "한국어 음성"
+assert_not_contains "search 질의: 비매칭 데이터셋 제외" "$OUT" "영어 음성"
+assert_not_contains "search 질의: 비매칭 패키지 제외"   "$OUT" "영어 번역 말뭉치"
 
 # ───────────────────────────────────────────────
 echo
