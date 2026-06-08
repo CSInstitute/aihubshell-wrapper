@@ -49,34 +49,42 @@ assert_eq() {
 
 # ---- 샌드박스 구성 ----
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/ahcli_test.XXXXXX")"
-MOCK_BIN="$SANDBOX/bin"
+SRCDIR="$SANDBOX/src"          # install 소스 (wrapper + mock aihubshell)
+PREFIX="$SANDBOX/prefix"       # install 대상 (= 실제 사용될 aihubshell 위치)
 MOCK_LOG="$SANDBOX/mock_calls.log"
 FAKE_HOME="$SANDBOX/home"
 FAKE_CONF="$SANDBOX/conf/key"
-mkdir -p "$MOCK_BIN" "$FAKE_HOME" "$(dirname "$FAKE_CONF")"
+mkdir -p "$SRCDIR" "$FAKE_HOME" "$(dirname "$FAKE_CONF")"
 
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
 # mock aihubshell: 받은 인자를 로그에 1줄로 기록하고 그대로 echo. 네트워크 없음.
-cat > "$MOCK_BIN/aihubshell" <<'MOCK'
+# 소스 디렉터리에 둔 뒤 wrapper 의 install 로 PREFIX 에 배치 → 실제 설치 흐름과 동일.
+# (일부러 chmod 안 함: install 이 755 를 부여하는지까지 검증)
+cat > "$SRCDIR/aihubshell" <<'MOCK'
 #!/usr/bin/env bash
 printf 'ARGS:'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'
 printf '%s\n' "$*" >> "$MOCK_LOG_FILE"
 exit 0
 MOCK
-chmod 755 "$MOCK_BIN/aihubshell"
+cp "$WRAPPER" "$SRCDIR/ahcli.bash"
 
-# 래퍼 실행 래퍼: 샌드박스 환경으로 격리. mock 을 PATH 최우선.
+# wrapper 의 install 로 mock 을 PREFIX 에 설치 (HOME=샌드박스 → rc 미오염, sudo 불필요)
+HOME="$FAKE_HOME" AIHUB_PREFIX="$PREFIX" \
+  bash "$SRCDIR/ahcli.bash" install >/dev/null 2>&1
+
+# 래퍼 실행 래퍼: 설치된 $PREFIX/aih 를 PREFIX 의 aihubshell 로 구동 (환경 통일).
 # 결과는 전역 OUT(=stdout+stderr 결합), RC(=종료코드) 에 저장.
 # (명령 치환 서브셸을 쓰면 RC 가 부모로 전파되지 않으므로 전역 + 임시파일 사용)
 OUT=""; RC=0
 run() {
-  PATH="$MOCK_BIN:$PATH" \
+  PATH="$PREFIX:$PATH" \
   HOME="$FAKE_HOME" \
   AIHUB_CONF="$FAKE_CONF" \
+  AIHUB_PREFIX="$PREFIX" \
   MOCK_LOG_FILE="$MOCK_LOG" \
-  bash "$WRAPPER" "$@" >"$SANDBOX/_out" 2>&1
+  bash "$PREFIX/aih" "$@" >"$SANDBOX/_out" 2>&1
   RC=$?
   OUT="$(cat "$SANDBOX/_out")"
 }
@@ -101,16 +109,20 @@ else
   echo "  $(c_dim '· shellcheck 미설치 — 건너뜀')"
 fi
 
+# 셋업 sanity: 전역 install 로 PREFIX 에 실행 가능한 aihubshell 이 배치됐는가
+if [[ -x "$PREFIX/aihubshell" && -x "$PREFIX/aih" ]]; then ok "셋업: PREFIX 에 mock aihubshell 설치됨"
+else bad "셋업: PREFIX 에 mock aihubshell 설치됨" "install 실패 — 이후 테스트 신뢰불가"; fi
+
 # ───────────────────────────────────────────────
 echo
 echo "[2] 도움말 / 알 수 없는 명령"
 # ───────────────────────────────────────────────
 run
-assert_contains "인자 없음 → 사용법 출력" "$OUT" "aih install"
+assert_contains "인자 없음 → 사용법 출력" "$OUT" "install"
 assert_eq "인자 없음 → 종료코드 1" "$RC" "1"
 
 run boguscmd
-assert_contains "알 수 없는 명령 → 사용법 출력" "$OUT" "aih login"
+assert_contains "알 수 없는 명령 → 사용법 출력" "$OUT" "login"
 assert_eq "알 수 없는 명령 → 종료코드 1" "$RC" "1"
 
 # ───────────────────────────────────────────────
@@ -170,18 +182,18 @@ echo "[6] 키 해석 우선순위 / 부재 처리"
 # ───────────────────────────────────────────────
 # AIHUB_APIKEY 환경변수가 파일보다 우선
 out="$(
-  PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
-  MOCK_LOG_FILE="$MOCK_LOG" AIHUB_APIKEY="ENV_KEY_999" \
-  bash "$WRAPPER" get 71265 2>&1
+  PATH="$PREFIX:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
+  AIHUB_PREFIX="$PREFIX" MOCK_LOG_FILE="$MOCK_LOG" AIHUB_APIKEY="ENV_KEY_999" \
+  bash "$PREFIX/aih" get 71265 2>&1
 )"
 assert_contains "AIHUB_APIKEY 가 파일보다 우선" "$out" "[-aihubapikey] [ENV_KEY_999]"
 
 # 키 전혀 없음 → 에러
 EMPTY_CONF="$SANDBOX/empty/key"
 out="$(
-  PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$EMPTY_CONF" \
-  MOCK_LOG_FILE="$MOCK_LOG" \
-  bash "$WRAPPER" get 71265 2>&1
+  PATH="$PREFIX:$PATH" HOME="$FAKE_HOME" AIHUB_CONF="$EMPTY_CONF" \
+  AIHUB_PREFIX="$PREFIX" MOCK_LOG_FILE="$MOCK_LOG" \
+  bash "$PREFIX/aih" get 71265 2>&1
 )"; rc_nokey=$?
 assert_contains "키 부재 → 안내 메시지" "$out" "no key"
 assert_eq "키 부재 → 비정상 종료" "$rc_nokey" "1"
@@ -195,11 +207,44 @@ ISO="$SANDBOX/iso"; mkdir -p "$ISO"
 cp "$WRAPPER" "$ISO/ahcli.bash"   # 옆에 aihubshell 없는 위치로 복사
 out="$(
   PATH="/usr/bin:/bin" HOME="$FAKE_HOME" AIHUB_CONF="$FAKE_CONF" \
-  MOCK_LOG_FILE="$MOCK_LOG" \
+  AIHUB_PREFIX="$SANDBOX/none" MOCK_LOG_FILE="$MOCK_LOG" \
   bash "$ISO/ahcli.bash" ls 2>&1
 )"; rc_noshell=$?
 assert_contains "aihubshell 없음 → 안내 메시지" "$out" "aihubshell 없음"
 assert_eq "aihubshell 없음 → 종료코드 1" "$rc_noshell" "1"
+
+# ───────────────────────────────────────────────
+echo
+echo "[7.5] install (샌드박스 PREFIX — /opt·rc 미오염)"
+# ───────────────────────────────────────────────
+# 음성: 옆에 aihubshell 없는 위치에서 install → 존재 검사 실패 메시지 + exit 1
+NOSRC="$SANDBOX/nosrc"; mkdir -p "$NOSRC"
+cp "$WRAPPER" "$NOSRC/ahcli.bash"
+out="$(
+  HOME="$FAKE_HOME" AIHUB_PREFIX="$SANDBOX/prefix_neg" \
+  bash "$NOSRC/ahcli.bash" install 2>&1
+)"; rc_inst_neg=$?
+assert_contains "install: 소스 없음 → 안내" "$out" "aihubshell"
+assert_eq "install: 소스 없음 → 종료코드 1" "$rc_inst_neg" "1"
+
+# 양성: 실행권한 없는 aihubshell 이 옆에 있어도 설치 성공해야 함 (버그 회귀 방지)
+SRCDIR="$SANDBOX/srcdir"; mkdir -p "$SRCDIR"
+cp "$WRAPPER" "$SRCDIR/ahcli.bash"
+printf '#!/bin/sh\necho hi\n' > "$SRCDIR/aihubshell"   # 일부러 chmod 안 함 (-rw-r--r--)
+INST_PREFIX="$SANDBOX/prefix"
+out="$(
+  HOME="$FAKE_HOME" AIHUB_PREFIX="$INST_PREFIX" \
+  bash "$SRCDIR/ahcli.bash" install 2>&1
+)"; rc_inst=$?
+assert_eq "install: 비실행 소스로도 설치 성공 (exit 0)" "$rc_inst" "0"
+assert_contains "install: 설치 완료 메시지" "$out" "installed"
+if [[ -x "$INST_PREFIX/aihubshell" ]]; then ok "install: 사본에 실행권한 755 부여"
+else bad "install: 사본에 실행권한 755 부여" "$INST_PREFIX/aihubshell 실행불가"; fi
+if [[ -x "$INST_PREFIX/aih" ]]; then ok "install: aih 래퍼 복제됨"
+else bad "install: aih 래퍼 복제됨" "$INST_PREFIX/aih 없음"; fi
+# 실제 /opt 와 사용자 rc 파일은 건드리지 않았는지
+if [[ ! -e /opt/aihub || -n "${ALLOW_OPT:-}" ]]; then ok "install: 실제 /opt/aihub 미오염"
+else bad "install: 실제 /opt/aihub 미오염" "/opt/aihub 가 생성됨"; fi
 
 # ───────────────────────────────────────────────
 echo

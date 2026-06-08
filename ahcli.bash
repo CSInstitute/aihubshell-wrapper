@@ -3,7 +3,7 @@
 set -euo pipefail
 
 CONF="${AIHUB_CONF:-$HOME/.config/aihub/key}"
-PREFIX="/opt/aihub"
+PREFIX="${AIHUB_PREFIX:-/opt/aihub}"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- aihubshell 위치 확보 (PATH에 없으면 스크립트 옆에서 임시 로드) ---
@@ -55,8 +55,8 @@ cmd="${1:-}"; shift || true
 case "$cmd" in
   install)  # /opt/aihub 에 복제 + 전역 PATH 등록
     src="$SELF_DIR/aihubshell"
-    [[ -x "$src" ]] || { echo "스크립트 옆에 aihubshell 실행파일 없음" >&2; exit 1; }
-    SUDO=""; [[ -w /opt ]] || SUDO="sudo"
+    [[ -f "$src" ]] || { echo "스크립트 옆에 aihubshell 파일 없음" >&2; exit 1; }
+    SUDO=""; [[ -w "$(dirname "$PREFIX")" ]] || SUDO="sudo"
     $SUDO mkdir -p "$PREFIX"
     $SUDO cp "$src" "$PREFIX/aihubshell"
     $SUDO cp "$SELF_DIR/$(basename "${BASH_SOURCE[0]}")" "$PREFIX/aih"
@@ -104,7 +104,7 @@ ahcli login <KEY>           키 저장 (~/.config/aihub/key, 600)
 ahcli ls [datasetkey]       데이터셋/파일 목록
 ahcli pls [datapckagekey]   패키지/파일 목록
 ahcli get  <dsk> [fk...]    데이터셋 다운로드 (생략=전체)
-a pget <pk>  [fk...]    패키지 다운로드
+ahcli pget <pk>  [fk...]    패키지 다운로드
 EOF
     exit 1 ;;
 esac
