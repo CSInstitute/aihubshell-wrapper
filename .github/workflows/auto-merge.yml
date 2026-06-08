@@ -1,0 +1,24 @@
+name: Auto-merge (develop)
+
+# Calls the org-shared reusable workflow to enable GitHub native squash
+# auto-merge on PRs targeting `develop`. The PR merges automatically once the
+# required status checks (bash/zsh wrapper tests) pass. Add the `do-not-merge`
+# label to hold a PR open.
+#
+# Requires (per CSInstitute/.github CALLER CONTRACT):
+#   - Settings → "Allow auto-merge" = ON
+#   - Settings → "Automatically delete head branch" = ON
+#   - Ruleset on `develop` with the required checks
+#   - Org secrets CSI_CI_APP_ID / CSI_CI_APP_PRIVATE_KEY granted to this repo
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled, edited]
+    branches: [develop]
+
+jobs:
+  auto-merge:
+    uses: CSInstitute/.github/.github/workflows/auto-merge.yml@v1
+    with:
+      target-base: develop
+    secrets: inherit
