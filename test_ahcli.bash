@@ -74,7 +74,7 @@ cp "$WRAPPER" "$SRCDIR/ahcli.bash"
 HOME="$FAKE_HOME" AIHUB_PREFIX="$PREFIX" \
   bash "$SRCDIR/ahcli.bash" install >/dev/null 2>&1
 
-# 래퍼 실행 래퍼: 설치된 $PREFIX/aih 를 PREFIX 의 aihubshell 로 구동 (환경 통일).
+# 래퍼 실행 래퍼: 설치된 $PREFIX/ahcli 를 PREFIX 의 aihubshell 로 구동 (환경 통일).
 # 결과는 전역 OUT(=stdout+stderr 결합), RC(=종료코드) 에 저장.
 # (명령 치환 서브셸을 쓰면 RC 가 부모로 전파되지 않으므로 전역 + 임시파일 사용)
 OUT=""; RC=0
@@ -240,8 +240,8 @@ assert_eq "install: 비실행 소스로도 설치 성공 (exit 0)" "$rc_inst" "0
 assert_contains "install: 설치 완료 메시지" "$out" "installed"
 if [[ -x "$INST_PREFIX/aihubshell" ]]; then ok "install: 사본에 실행권한 755 부여"
 else bad "install: 사본에 실행권한 755 부여" "$INST_PREFIX/aihubshell 실행불가"; fi
-if [[ -x "$INST_PREFIX/aih" ]]; then ok "install: aih 래퍼 복제됨"
-else bad "install: aih 래퍼 복제됨" "$INST_PREFIX/aih 없음"; fi
+if [[ -x "$INST_PREFIX/aih" ]]; then ok "install: ahcli 래퍼 복제됨"
+else bad "install: ahcli 래퍼 복제됨" "$INST_PREFIX/ahcli 없음"; fi
 # 실제 /opt 와 사용자 rc 파일은 건드리지 않았는지
 if [[ ! -e /opt/aihub || -n "${ALLOW_OPT:-}" ]]; then ok "install: 실제 /opt/aihub 미오염"
 else bad "install: 실제 /opt/aihub 미오염" "/opt/aihub 가 생성됨"; fi

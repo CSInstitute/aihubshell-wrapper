@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aih — aihubshell 래퍼
+# ahcli — aihubshell 래퍼
 set -euo pipefail
 
 CONF="${AIHUB_CONF:-$HOME/.config/aihub/key}"
@@ -17,7 +17,7 @@ _ensure_shell() {
     export PATH="$PREFIX:$PATH"
     return
   fi
-  echo "aihubshell 없음. 스크립트와 같은 위치에 두거나 'aih install' 실행" >&2
+  echo "aihubshell 없음. 스크립트와 같은 위치에 두거나 'ahcli install' 실행" >&2
   exit 1
 }
 
@@ -67,7 +67,7 @@ _reload_hint() {
 _key() {
   [[ -n "${AIHUB_APIKEY:-}" ]] && { echo "$AIHUB_APIKEY"; return; }
   [[ -f "$CONF" ]] && { cat "$CONF"; return; }
-  echo "no key. run: aih login <KEY>" >&2; exit 1
+  echo "no key. run: ahcli login <KEY>" >&2; exit 1
 }
 
 cmd="${1:-}"; shift || true
@@ -114,7 +114,7 @@ case "$cmd" in
       echo "source: file ($CONF)"
       echo "key:    $(_mask "$k")  (len=${#k})"
     else
-      echo "캐시된 키 없음. 'aih login <KEY>' 로 저장" >&2; exit 1
+      echo "캐시된 키 없음. 'ahcli login <KEY>' 로 저장" >&2; exit 1
     fi ;;
 
   logout)  # 저장된 키 말소
