@@ -1,24 +1,120 @@
 name: Auto-merge (develop)
 
-# Calls the org-shared reusable workflow to enable GitHub native squash
-# auto-merge on PRs targeting `develop`. The PR merges automatically once the
-# required status checks (bash/zsh wrapper tests) pass. Add the `do-not-merge`
-# label to hold a PR open.
+# Enables GitHub native squash auto-merge on PRs targeting `develop`. The squash
+# commit is attributed to the org GitHub App ("CSInstitute CI[bot]"), and the
+# body is appended with deduped `Co-authored-by:` trailers. The PR merges once
+# the required status checks (bash/zsh/sh wrapper tests) pass. Add the
+# `do-not-merge` label to hold a PR open.
 #
-# Requires (per CSInstitute/.github CALLER CONTRACT):
+# Why inlined (not a reusable `uses:` call):
+#   This repo is PUBLIC, but the org reusable workflow lives in the PRIVATE
+#   `CSInstitute/.github` repo. GitHub forbids a public caller from invoking a
+#   private reusable workflow (startup failure, `referenced_workflows: []`), so
+#   the org reusable logic (CSInstitute/.github@v1) is reproduced here verbatim.
+#
+# Requires:
 #   - Settings → "Allow auto-merge" = ON
-#   - Settings → "Automatically delete head branch" = ON
-#   - Ruleset on `develop` with the required checks
+#   - Settings → "Automatically delete head branch" = ON (recommended)
 #   - Org secrets CSI_CI_APP_ID / CSI_CI_APP_PRIVATE_KEY granted to this repo
+#   - Org GitHub App (Pull Requests R/W, Contents R/W, Metadata R) installed here
+#   - Ruleset on `develop` with the required status checks
 
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled, edited]
     branches: [develop]
 
+permissions: {}
+
+concurrency:
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  auto-merge:
-    uses: CSInstitute/.github/.github/workflows/auto-merge.yml@v1
-    with:
-      target-base: develop
-    secrets: inherit
+  enable-auto-merge:
+    name: Enable squash auto-merge with co-authors
+    runs-on: ubuntu-latest
+    # Gates: only the `develop` base, non-draft, same-repo PRs (forks get no
+    # secret access), and PRs without the `do-not-merge` label.
+    if: >-
+      github.event.pull_request.base.ref == 'develop' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.labels.*.name, 'do-not-merge')
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CSI_CI_APP_ID }}
+          private-key: ${{ secrets.CSI_CI_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        # `gh pr merge` shells out to git for branch/remote resolution, so the
+        # runner needs a working tree even though the merge itself is API-driven.
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build squash commit body with Co-authored-by trailers
+        id: body
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Collect candidates:
+          #   (a) each commit's author identity ("Name <email>") — but only when
+          #       GitHub resolves the author to a user other than the PR author.
+          #       Comparing the commit's git email to the PR author's noreply
+          #       address misses contributors who commit with a custom email
+          #       (e.g. "hello@csi.re.kr"), so use the GitHub-resolved login.
+          #   (b) any existing "Co-authored-by: Name <email>" trailers in commit
+          #       messages — case-insensitive, since "Co-Authored-By" (title-case)
+          #       is a common variant.
+          {
+            gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/commits" \
+              --jq '.[]
+                | select((.author.login // "") != env.PR_AUTHOR_LOGIN)
+                | "\(.commit.author.name) <\(.commit.author.email)>"'
+            gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/commits" \
+              --jq '.[].commit.message' \
+              | grep -iE '^co-authored-by:' \
+              | sed -E 's/^co-authored-by:[[:space:]]*//I' \
+              || true
+          } \
+            | awk 'NF' \
+            | grep -viE '\[bot\]|noreply\.github\.com>$' \
+            | sort -u \
+            > /tmp/coauthors.txt || true
+
+          # Squash body = PR description + blank line + trailers.
+          printf '%s\n' "${PR_BODY:-}" > /tmp/body.txt
+          if [ -s /tmp/coauthors.txt ]; then
+            printf '\n' >> /tmp/body.txt
+            sed 's/^/Co-authored-by: /' /tmp/coauthors.txt >> /tmp/body.txt
+          fi
+
+          echo "body_file=/tmp/body.txt" >> "$GITHUB_OUTPUT"
+          echo "coauthor_count=$(wc -l < /tmp/coauthors.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BODY_FILE: ${{ steps.body.outputs.body_file }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR_NUMBER" \
+            --auto \
+            --squash \
+            --delete-branch \
+            --subject "$PR_TITLE" \
+            --body-file "$BODY_FILE"

@@ -24,3 +24,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: test_ahcli.zsh 실행 (네트워크 호출 없음)
         run: zsh test_ahcli.zsh
+
+  sh-test:
+    name: sh(POSIX) 래퍼 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: test_ahcli.sh 실행 (네트워크 호출 없음, /bin/sh=dash)
+        run: sh test_ahcli.sh
