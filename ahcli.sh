@@ -29,25 +29,23 @@ _add_path_rc() {
   dir="$1"
   line="export PATH=\"$dir:\$PATH\"  # aihub"
 
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-    [ -f "$rc" ] || continue
-    grep -qF "# aihub" "$rc" 2>/dev/null && continue
-    printf '\n%s\n' "$line" >> "$rc"
-    echo "added PATH → $rc"
-  done
+  # POSIX sh 전용 rc. 없으면 생성(로그인 셸이 읽도록).
+  rc="$HOME/.profile"
+  if grep -qF "# aihub" "$rc" 2>/dev/null; then return; fi
+  printf '\n%s\n' "$line" >> "$rc"
+  echo "added PATH → $rc"
 }
 
 # --- rc 파일에서 PATH 라인(# aihub 마커) 멱등 제거 ---
 _remove_path_rc() {
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-    [ -f "$rc" ] || continue
-    grep -qF "# aihub" "$rc" 2>/dev/null || continue
-    tmp="$(mktemp)"
-    grep -vF "# aihub" "$rc" > "$tmp" && cat "$tmp" > "$rc"
-    rm -f "$tmp"
+  rc="$HOME/.profile"
+  [ -f "$rc" ] || return
+  grep -qF "# aihub" "$rc" 2>/dev/null || return
+  tmp="$(mktemp)"
+  grep -vF "# aihub" "$rc" > "$tmp" && cat "$tmp" > "$rc"
+  rm -f "$tmp"
 
-    echo "removed PATH ← $rc"
-  done
+  echo "removed PATH ← $rc"
 }
 
 # --- 캐시 키 마스킹 (앞4·뒤4만 노출) ---
@@ -65,7 +63,7 @@ _mask() {
 _reload_hint() {
   echo
   echo "Applying environment variables:"
-  echo "  source ~/.bashrc   (If zsh, ~/.zshrc)"
+  echo "  source ~/.profile"
   echo "or new shell:  exec \$SHELL -l"
 
   # --reload 플래그가 있으면 현재 셸 교체
@@ -128,7 +126,7 @@ case "$cmd" in
       echo "No install: $PREFIX"
     fi
     _remove_path_rc
-    echo "\$PATH line removed. Reflected in the new shell (source ~/.bashrc or exec \$SHELL -l)" ;;
+    echo "\$PATH line removed. Reflected in the new shell (source ~/.profile or exec \$SHELL -l)" ;;
 
   login)
     mkdir -p "$(dirname "$CONF")"
