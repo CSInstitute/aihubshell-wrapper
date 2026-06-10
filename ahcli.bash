@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # ahcli — aihubshell 래퍼
+
+# --- 실행 셸 가드: bash 가 아니면 중단 (set -o pipefail 보다 먼저 검사) ---
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "ahcli.bash requires bash. Use ahcli.zsh (zsh) or ahcli.sh (POSIX sh)." >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 CONF="${AIHUB_CONF:-$HOME/.config/aihub/key}"
