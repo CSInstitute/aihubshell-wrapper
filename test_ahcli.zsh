@@ -269,6 +269,11 @@ if [[ -x "$INST_PREFIX/aihubshell" ]]; then ok "install: 사본에 실행권한 
 else bad "install: 사본에 실행권한 755 부여" "$INST_PREFIX/aihubshell 실행불가"; fi
 if [[ -x "$INST_PREFIX/ahcli" ]]; then ok "install: ahcli 래퍼 복제됨"
 else bad "install: ahcli 래퍼 복제됨" "$INST_PREFIX/ahcli 없음"; fi
+# 회귀(시놀로지): root umask(077) 에서도 PREFIX 디렉터리가 전 사용자 traverse 가능(755)
+UMP="$SANDBOX/umask_prefix"
+( umask 077; HOME="$FAKE_HOME" AIHUB_PREFIX="$UMP" zsh "$SRCDIR/ahcli.zsh" install >/dev/null 2>&1 )
+dperm="$(stat -c '%a' "$UMP" 2>/dev/null || stat -f '%Lp' "$UMP" 2>/dev/null)"
+assert_eq "install: umask 077 에서도 PREFIX 디렉터리 755 (traverse 가능)" "$dperm" "755"
 # 실제 /opt 와 사용자 rc 파일은 건드리지 않았는지
 if [[ ! -e /opt/aihub || -n "${ALLOW_OPT:-}" ]]; then ok "install: 실제 /opt/aihub 미오염"
 else bad "install: 실제 /opt/aihub 미오염" "/opt/aihub 가 생성됨"; fi
