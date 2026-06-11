@@ -164,7 +164,10 @@ case "$cmd" in
     $SUDO mkdir -p "$PREFIX"
     $SUDO cp "$src" "$PREFIX/aihubshell"
     $SUDO cp "${0:A}" "$PREFIX/ahcli"
-    $SUDO chmod 755 "$PREFIX/aihubshell" "$PREFIX/ahcli"
+    # 디렉터리도 755: root umask(077)면 mkdir 이 0700 으로 만들어 일반 사용자가
+    # PREFIX 안을 traverse 못 해 PATH 등록이 무력화됨(시놀로지 회귀). 재설치 시
+    # 기존 잘못된 권한도 교정.
+    $SUDO chmod 755 "$PREFIX" "$PREFIX/aihubshell" "$PREFIX/ahcli"
 
     echo "installed → $PREFIX"
 
