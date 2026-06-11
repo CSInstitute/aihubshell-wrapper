@@ -31,32 +31,83 @@ _ensure_shell() {
   exit 1
 }
 
-# --- rc 파일에 PATH 라인 멱등 추가 ---
+# --- 호스트 로그인 셸 식별 ($SHELL 우선 → passwd 조회 → 최종 폴백 /bin/sh) ---
+# 서브셸로 실행해도 $SHELL 은 사용자의 로그인 셸을 가리키므로 신뢰 가능.
+_host_shell() {
+  local hs="${SHELL:-}"
+  if [[ -z "$hs" ]] && command -v getent >/dev/null 2>&1; then
+    hs="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7 || true)"
+  fi
+  if [[ -z "$hs" ]] && command -v dscl >/dev/null 2>&1; then
+    hs="$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | awk '{print $2}' || true)"
+  fi
+  basename "${hs:-/bin/sh}"
+}
+
+# --- 호스트 셸이 실제 읽는 startup 파일을 로그인+인터랙티브 합집합으로 산출 ---
+# 개행 구분·중복 제거. ZDOTDIR(zsh)·$ENV(POSIX)·precedence(bash) 를 존중하므로
+# 시놀로지 등 비표준 환경에서도 하드코딩 없이 올바른 파일을 찾는다.
+_rc_targets() {
+  local f login
+  {
+    case "$(_host_shell)" in
+      zsh)
+        printf '%s\n' "${ZDOTDIR:-$HOME}/.zshrc" ;;
+      bash)
+        printf '%s\n' "$HOME/.bashrc"            # 인터랙티브 비로그인
+        # 로그인 셸 파일: 존재하는 첫 항목. 하나도 없으면 .profile 을 대상으로
+        # 한다(.bash_profile 을 새로 만들면 기존 .profile 이 섀도잉되므로 회피).
+        login=""
+        for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+          [[ -f "$f" ]] && { login="$f"; break; }
+        done
+        printf '%s\n' "${login:-$HOME/.profile}" ;;
+      *)
+        printf '%s\n' "$HOME/.profile"           # POSIX 로그인 셸 (sh/dash/ash/ksh)
+        case "${ENV:-}" in
+          /*) printf '%s\n' "$ENV" ;;            # 인터랙티브 비로그인 (절대경로만)
+        esac ;;
+    esac
+  } | awk 'NF && !seen[$0]++'
+}
+
+# --- uninstall 시 마커를 지울 후보 (감지와 무관하게 알려진 모든 startup 파일) ---
+# 설치 후 사용자가 로그인 셸을 바꿔도 잔여 PATH 라인이 남지 않도록 폭넓게 청소.
+_rc_cleanup_candidates() {
+  local zdir="${ZDOTDIR:-$HOME}"
+  {
+    printf '%s\n' \
+      "$HOME/.profile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_login" \
+      "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.zshenv" \
+      "$zdir/.zshrc" "$zdir/.zprofile" "$zdir/.zshenv"
+    case "${ENV:-}" in /*) printf '%s\n' "$ENV" ;; esac
+  } | awk 'NF && !seen[$0]++'
+}
+
+# --- rc 파일들에 PATH 라인 멱등 추가 (해석된 타깃 전체) ---
 _add_path_rc() {
   local dir="$1" line rc
   line="export PATH=\"$dir:\$PATH\"  # aihub"
-
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-    [[ -f "$rc" ]] || continue
+  while IFS= read -r rc; do
+    [[ -n "$rc" ]] || continue
     grep -qF "# aihub" "$rc" 2>/dev/null && continue
-    printf '\n%s\n' "$line" >> "$rc"
+    printf '\n%s\n' "$line" >> "$rc"   # 없으면 생성됨
     echo "added PATH → $rc"
-  done
+  done < <(_rc_targets)
 }
 
-# --- rc 파일에서 PATH 라인(# aihub 마커) 멱등 제거 ---
+# --- rc 파일들에서 PATH 라인(# aihub 마커) 멱등 제거 (알려진 후보 전체) ---
 _remove_path_rc() {
   local rc tmp
-
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  while IFS= read -r rc; do
+    [[ -n "$rc" ]] || continue
     [[ -f "$rc" ]] || continue
     grep -qF "# aihub" "$rc" 2>/dev/null || continue
     tmp="$(mktemp)"
     grep -vF "# aihub" "$rc" > "$tmp" && cat "$tmp" > "$rc"
     rm -f "$tmp"
-
     echo "removed PATH ← $rc"
-  done
+  done < <(_rc_cleanup_candidates)
 }
 
 # --- 캐시 키 마스킹 (앞4·뒤4만 노출) ---
@@ -68,7 +119,10 @@ _mask() {
 _reload_hint() {
   echo
   echo "Applying environment variables:"
-  echo "  source ~/.bashrc   (If zsh, ~/.zshrc)"
+  local rc
+  while IFS= read -r rc; do
+    [[ -n "$rc" ]] && echo "  source $rc"
+  done < <(_rc_targets)
   echo "or new shell:  exec \$SHELL -l"
 
   # --reload 플래그가 있으면 현재 셸 교체
@@ -131,7 +185,7 @@ case "$cmd" in
       echo "No install: $PREFIX"
     fi
     _remove_path_rc
-    echo "\$PATH line removed. Reflected in the new shell (source ~/.bashrc or exec \$SHELL -l)" ;;
+    echo "\$PATH line removed. Start a new shell to apply (exec \$SHELL -l)" ;;
 
   login)
     mkdir -p "$(dirname "$CONF")"
@@ -192,6 +246,9 @@ case "$cmd" in
     key="$(_key)" || exit 1           # 키 부재 시 메인 셸에서 중단
     aihubshell -aihubapikey "$key" -mode pd \
       -datapckagekey "$pk" ${fk:+-filekey "$fk"} ;;
+
+  __rc-targets)  _rc_targets ;;          # (내부) 감지된 설치 타깃 — 테스트/디버그용
+  __host-shell)  _host_shell ;;          # (내부) 감지된 호스트 셸 — 테스트/디버그용
 
   *) cat <<'EOF'
 ahcli install [--reload]    Clone /opt/aihub + Add to global PATH

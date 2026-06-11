@@ -67,6 +67,10 @@ FAKE_HOME="$SANDBOX/home"
 FAKE_CONF="$SANDBOX/conf/key"
 mkdir -p "$SRCDIR" "$FAKE_HOME" "$(dirname "$FAKE_CONF")"
 
+# 이 하니스의 install/uninstall 검증은 호스트 셸을 sh 로 고정해 결정론적으로 한다
+# (rc 타깃=~/.profile). 셸별 감지 동작 자체는 [11] 에서 $SHELL 주입으로 따로 검증.
+export SHELL=/bin/sh
+
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
@@ -378,6 +382,60 @@ out="$(
   sh "$SRCDIR/ahcli.sh" uninstall 2>&1
 )"
 assert_contains "uninstall 재실행 → 설치본 없음 안내" "$out" "No install"
+
+# ───────────────────────────────────────────────
+echo
+echo "[11] rc 타깃 해석 (환경 감지: Mac / 시놀로지 — 부작용 없음, 원격 NAS 불필요)"
+# ───────────────────────────────────────────────
+# 리졸버는 $SHELL·$ZDOTDIR·$ENV·$HOME 의 순수 함수. 이 값들을 주입해
+# Mac(zsh)·시놀로지(sh/ash/bash) 환경을 시뮬레이션하고 __rc-targets 로 검증한다.
+# __rc-targets 는 파일을 만들지 않으므로 실제 rc 무오염.
+DHOME="$SANDBOX/detect"; mkdir -p "$DHOME"
+rc_targets() {  # $1=SHELL $2=HOME [$3=ZDOTDIR] [$4=ENV] — 빈 값은 unset 과 동일
+  SHELL="$1" HOME="$2" ZDOTDIR="${3:-}" ENV="${4:-}" sh "$WRAPPER" __rc-targets 2>/dev/null
+}
+host_shell() { SHELL="$1" HOME="$2" sh "$WRAPPER" __host-shell 2>/dev/null; }
+
+# M1: 이 Mac (zsh, ZDOTDIR 없음) → ~/.zshrc 단일
+assert_eq "감지 M1[Mac zsh]: 타깃=~/.zshrc"        "$(rc_targets /bin/zsh "$DHOME")"  "$DHOME/.zshrc"
+assert_eq "감지 M1[Mac zsh]: host_shell=zsh"       "$(host_shell /bin/zsh "$DHOME")"  "zsh"
+
+# M2: zsh + ZDOTDIR → $ZDOTDIR/.zshrc (비표준 위치 존중)
+ZD="$SANDBOX/zdot"; mkdir -p "$ZD"
+assert_eq "감지 M2[zsh+ZDOTDIR]: 타깃=\$ZDOTDIR/.zshrc" "$(rc_targets /usr/bin/zsh "$DHOME" "$ZD")" "$ZD/.zshrc"
+
+# S1: 시놀로지 sh → ~/.profile
+assert_eq "감지 S1[Syno sh]: 타깃=~/.profile"      "$(rc_targets /bin/sh "$DHOME")"   "$DHOME/.profile"
+assert_eq "감지 S1[Syno sh]: host_shell=sh"        "$(host_shell /bin/sh "$DHOME")"   "sh"
+
+# S2: 시놀로지 ash(busybox) → POSIX 취급 → ~/.profile
+assert_eq "감지 S2[Syno ash]: 타깃=~/.profile"     "$(rc_targets /bin/ash "$DHOME")"  "$DHOME/.profile"
+
+# S3: 시놀로지 sh + $ENV(인터랙티브 rc) → .profile + $ENV
+S3="$(rc_targets /bin/sh "$DHOME" "" "/etc/profile.shrc")"
+assert_contains "감지 S3[Syno sh+ENV]: .profile 포함" "$S3" "$DHOME/.profile"
+assert_contains "감지 S3[Syno sh+ENV]: \$ENV 포함"    "$S3" "/etc/profile.shrc"
+
+# S4: 시놀로지 bash + .profile 만 존재 → .bashrc + 기존 .profile
+#     (★ .bash_profile 을 새로 만들면 기존 .profile 이 섀도잉되므로 생성 금지)
+B4="$SANDBOX/syno_bash"; mkdir -p "$B4"; printf 'echo prof\n' > "$B4/.profile"
+S4="$(rc_targets /bin/bash "$B4")"
+assert_contains "감지 S4[Syno bash]: .bashrc 포함"       "$S4" "$B4/.bashrc"
+assert_contains "감지 S4[Syno bash]: 기존 .profile 포함" "$S4" "$B4/.profile"
+assert_not_contains "감지 S4[Syno bash]: .bash_profile 신규생성 금지(섀도잉 회피)" "$S4" "$B4/.bash_profile"
+if [ ! -e "$B4/.bashrc" ] && [ ! -e "$B4/.bash_profile" ]; then ok "감지 S4: __rc-targets 부작용 없음(파일 미생성)"
+else bad "감지 S4: __rc-targets 부작용 없음" "감지가 파일을 생성함"; fi
+
+# S5: 원격/cron — $SHELL 비어도 크래시 없이 타깃 산출 (passwd/dscl 폴백, 최종 /bin/sh)
+S5="$(rc_targets "" "$DHOME")"
+if [ -n "$S5" ]; then ok "감지 S5[원격 SHELL 공백]: 폴백으로 타깃 산출(크래시 없음)"
+else bad "감지 S5[원격 SHELL 공백]: 타깃 산출" "빈 출력"; fi
+
+# B1: bash + .bash_profile 존재 → precedence 상 .bash_profile 우선 (.profile 미선택)
+B1D="$SANDBOX/linux_bash"; mkdir -p "$B1D"; printf 'echo bp\n' > "$B1D/.bash_profile"
+B1="$(rc_targets /bin/bash "$B1D")"
+assert_contains "감지 B1[bash precedence]: .bash_profile 우선"  "$B1" "$B1D/.bash_profile"
+assert_not_contains "감지 B1[bash precedence]: .profile 미선택" "$B1" "$B1D/.profile"
 
 # ───────────────────────────────────────────────
 echo
