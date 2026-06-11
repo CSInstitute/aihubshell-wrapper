@@ -346,12 +346,16 @@ echo
 echo "[10] uninstall (격리 PREFIX/HOME — 실제 /opt·rc 미오염)"
 # ───────────────────────────────────────────────
 UPREFIX="$SANDBOX/uprefix"; UHOME="$SANDBOX/uhome"; mkdir -p "$UHOME"
-# 사용자 줄 + aihub PATH 줄이 섞인 가짜 rc ($PATH 는 rc 안 리터럴이라 단일따옴표 의도)
-# shellcheck disable=SC2016
-printf 'echo userline\nexport PATH="%s:$PATH"  # aihub\n' "$UPREFIX" > "$UHOME/.bashrc"
+# 사용자 줄만 있는 가짜 rc (~/.profile). install 이 # aihub PATH 줄을 멱등 추가해야 한다.
+printf 'echo userline\n' > "$UHOME/.profile"
 HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" sh "$SRCDIR/ahcli.sh" install >/dev/null 2>&1
 if [ -x "$UPREFIX/ahcli" ] && [ -x "$UPREFIX/aihubshell" ]; then ok "uninstall 전: 설치 상태 확인"
 else bad "uninstall 전: 설치 상태 확인" "install 실패"; fi
+# (install 측) ~/.profile 에 PATH 라인이 기록됐는지 확인
+if grep -qF "# aihub" "$UHOME/.profile"; then ok "install: rc 의 PATH 라인 추가"
+else bad "install: rc 의 PATH 라인 추가" "# aihub 라인 없음"; fi
+if grep -qF "$UPREFIX" "$UHOME/.profile"; then ok "install: PATH 에 PREFIX 포함"
+else bad "install: PATH 에 PREFIX 포함" "PREFIX 미포함"; fi
 
 out="$(
   HOME="$UHOME" AIHUB_PREFIX="$UPREFIX" \
@@ -363,9 +367,9 @@ if [ ! -e "$UPREFIX/ahcli" ] && [ ! -e "$UPREFIX/aihubshell" ]; then ok "uninsta
 else bad "uninstall: 바이너리 제거됨" "잔존 파일 있음"; fi
 if [ ! -d "$UPREFIX" ]; then ok "uninstall: 빈 PREFIX 디렉터리 제거"
 else bad "uninstall: 빈 PREFIX 디렉터리 제거" "$UPREFIX 잔존"; fi
-if ! grep -qF "# aihub" "$UHOME/.bashrc"; then ok "uninstall: rc 의 PATH 라인 제거"
+if ! grep -qF "# aihub" "$UHOME/.profile"; then ok "uninstall: rc 의 PATH 라인 제거"
 else bad "uninstall: rc 의 PATH 라인 제거" "# aihub 라인 잔존"; fi
-if grep -qx "echo userline" "$UHOME/.bashrc"; then ok "uninstall: rc 의 사용자 줄 보존"
+if grep -qx "echo userline" "$UHOME/.profile"; then ok "uninstall: rc 의 사용자 줄 보존"
 else bad "uninstall: rc 의 사용자 줄 보존" "사용자 줄이 손상됨"; fi
 
 # uninstall 멱등
